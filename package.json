@@ -4,31 +4,17 @@
   "description": "GitHub Action for syncing LeetCode submissions to a git repository",
   "main": "index.js",
   "scripts": {
-    "test": "node index.js test",
-    "package": "ncc build index.js",
-    "prepare": "husky"
+    "test": "node index.js test"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/joshcai/leetcode-sync.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/joshcai/leetcode-sync/issues"
-  },
-  "homepage": "https://github.com/joshcai/leetcode-sync#readme",
   "dependencies": {
-    "@actions/core": "^1.10.0",
-    "@actions/github": "^5.1.1",
-    "@octokit/rest": "^19.0.5",
-    "axios": "^1.6.7"
+    "@actions/core": "^1.10.1",
+    "@actions/github": "^6.0.0",
+    "@octokit/rest": "^20.0.2",
+    "axios": "^1.6.8",
+    "node-html-markdown": "^1.3.0",
+    "sprightly": "^2.0.1"
   },
   "devDependencies": {
-    "@vercel/ncc": "^0.38.1",
-    "dotenv": "^16.4.2",
-    "husky": "^9.0.10",
-    "node": "^20.11.0"
+    "dotenv": "^16.4.5"
   }
 }

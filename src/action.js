@@ -1,100 +1,20 @@
 const axios = require("axios");
 const { Octokit } = require("@octokit/rest");
-const path = require("path");
+const { NodeHtmlMarkdown } = require('node-html-markdown');
+const sprightly = require('sprightly')
+
+const process = require('process')
+process.chdir(__dirname)
 
 const COMMIT_MESSAGE = '[';
 const LANG_TO_EXTENSION = {
   'golang': 'go',
 };
-const BASE_URL = "https://leetcode.com";
 
 const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
 function log(message) {
   console.log(`[${new Date().toUTCString()}] ${message}`);
-}
-
-function pad(n) {
-  if (n.length > 4) {
-    return n;
-  }
-  var s = "000" + n;
-  return s.substring(s.length - 4);
-}
-
-function normalizeName(problemName) {
-  return problemName
-    .toLowerCase()
-    .replace(/\s/g, "-")
-    .replace(/[^a-zA-Z0-9_-]/gi, "");
-}
-
-function graphqlHeaders(session, csrfToken) {
-  return {
-    "content-type": "application/json",
-    origin: BASE_URL,
-    referer: BASE_URL,
-    cookie: `csrftoken=${csrfToken}; LEETCODE_SESSION=${session};`,
-    "x-csrftoken": csrfToken,
-  };
-}
-
-async function getInfo(submission, session, csrfToken) {
-  let data = JSON.stringify({
-    query: `query submissionDetails($submissionId: Int!) {
-      submissionDetails(submissionId: $submissionId) {
-        runtimePercentile
-        memoryPercentile
-        code
-        question {
-          questionId
-        }
-      }
-    }`,
-    variables: { submissionId: submission.id },
-  });
-
-  const headers = graphqlHeaders(session, csrfToken);
-
-  // No need to break on first request error since that would be done when getting submissions
-  const getInfo = async (maxRetries = 5, retryCount = 0) => {
-    try {
-      const response = await axios.post("https://leetcode.com/graphql/", data, {
-        headers,
-      });
-      const runtimePercentile = `${response.data.data.submissionDetails.runtimePercentile.toFixed(
-        2,
-      )}%`;
-      const memoryPercentile = `${response.data.data.submissionDetails.memoryPercentile.toFixed(
-        2,
-      )}%`;
-      const questionId = pad(
-        response.data.data.submissionDetails.question.questionId.toString(),
-      );
-
-      log(`Got info for submission #${submission.id}`);
-      return {
-        runtimePerc: runtimePercentile,
-        memoryPerc: memoryPercentile,
-        qid: questionId,
-        code: response.data.data.submissionDetails.code,
-      };
-    } catch (exception) {
-      if (retryCount >= maxRetries) {
-        throw exception;
-      }
-      log(
-        "Error fetching submission info, retrying in " +
-        3 ** retryCount +
-        " seconds...",
-      );
-      await delay(3 ** retryCount * 1000);
-      return getInfo(maxRetries, retryCount + 1);
-    }
-  };
-
-  info = await getInfo();
-  return { ...submission, ...info };
 }
 
 async function commit(params) {
@@ -107,47 +27,25 @@ async function commit(params) {
     treeSHA,
     latestCommitSHA,
     submission,
-    destinationFolder,
-    commitHeader,
-    questionData,
   } = params;
 
-  const name = normalizeName(submission.title);
-  log(`Committing solution for ${name}...`);
+  log(`Committing solution ${submission.id} for ${submission.title}...`);
 
   if (!LANG_TO_EXTENSION[submission.lang]) {
     throw `Language ${submission.lang} does not have a registered extension.`;
   }
 
-  const prefix = !!destinationFolder ? destinationFolder : "";
-  const commitName = !!commitHeader ? commitHeader : COMMIT_MESSAGE;
-
-  if ("runtimePerc" in submission) {
-    message = `${commitName} Runtime - ${submission.runtime} (${submission.runtimePerc}), Memory - ${submission.memory} (${submission.memoryPerc})`;
-    qid = `${submission.qid}-`;
-  } else {
-    message = `${commitName} Runtime - ${submission.runtime}, Memory - ${submission.memory}`;
-    qid = "";
-  }
-  const folderName = `${qid}${name}`;
-  // Markdown file for the problem with question data
-  const questionPath = path.join(prefix, folderName, "README.md");
-
-  // Separate file for the solution
-  const solutionFileName = `solution.${LANG_TO_EXTENSION[submission.lang]}`;
-  const solutionPath = path.join(prefix, folderName, solutionFileName);
-
   const treeData = [
     {
-      path: path.normalize(questionPath),
-      mode: "100644",
-      content: questionData,
+      path: `${submission.title}/${submission.slug}.${LANG_TO_EXTENSION[submission.lang]}`,
+      mode: '100644',
+      content: submission.code,
     },
     {
-      path: path.normalize(solutionPath),
-      mode: "100644",
-      content: `${submission.code}\n`, // Adds newline at EOF to conform to git recommendations
-    },
+      path: `${submission.title}/README.md`,
+      mode: '100644',
+      content: submission.readme,
+    }
   ];
 
   const treeResponse = await octokit.git.createTree({
@@ -157,11 +55,11 @@ async function commit(params) {
     tree: treeData,
   });
 
-  const date = new Date(Number(submission.timestamp) * 1000).toISOString();
+  const date = new Date(submission.timestamp * 1000).toISOString();
   const commitResponse = await octokit.git.createCommit({
     owner: owner,
     repo: repo,
-    message: `${COMMIT_MESSAGE}${submission.social.difficulty}] [${submission.tags}] [${submission.perf.runtimeDisplay}] [${submission.perf.memoryDisplay}]`,
+    message: `${COMMIT_MESSAGE}${submission.difficulty}] [${submission.tags}] [${submission.runtimeDisplay}] [${submission.memoryDisplay}]`,
     tree: treeResponse.data.sha,
     parents: [latestCommitSHA],
     author: {
@@ -174,80 +72,45 @@ async function commit(params) {
       name: commitInfo.name,
       date: date,
     },
-  });
+  })
 
   await octokit.git.updateRef({
     owner: owner,
     repo: repo,
     sha: commitResponse.data.sha,
-    ref: "heads/" + defaultBranch,
-    force: true,
+    ref: 'heads/' + defaultBranch,
+    force: true
   });
 
-  log(`Committed solution for ${name}`);
+  log(`Committed solution ${submission.id} for ${submission.title}`);
 
   return [treeResponse.data.sha, commitResponse.data.sha];
-}
-
-async function getQuestionData(titleSlug, leetcodeSession, csrfToken) {
-  log(`Getting question data for ${titleSlug}...`);
-
-  const headers = graphqlHeaders(leetcodeSession, csrfToken);
-  const graphql = JSON.stringify({
-    query: `query getQuestionDetail($titleSlug: String!) {
-      question(titleSlug: $titleSlug) {
-        content
-      }
-    }`,
-    variables: { titleSlug: titleSlug },
-  });
-
-  try {
-    const response = await axios.post(
-      "https://leetcode.com/graphql/",
-      graphql,
-      { headers },
-    );
-    const result = await response.data;
-    return result.data.question.content;
-  } catch (error) {
-    console.log("error", error);
-  }
 }
 
 // Returns false if no more submissions should be added.
 function addToSubmissions(params) {
   const {
     response,
-    lastTimestamp,
-    filterDuplicateSecs,
-    submissions_dict,
     submissions,
+    mostRecentTimestamp
   } = params;
 
   for (const submission of response.data.data.submissionList.submissions) {
     submissionTimestamp = Number(submission.timestamp);
-    if (submissionTimestamp <= lastTimestamp) {
+    if (submissionTimestamp <= mostRecentTimestamp) {
       return false;
     }
     if (submission.statusDisplay !== "Accepted") {
       continue;
     }
-    const name = normalizeName(submission.title);
-    const lang = submission.lang;
-    if (!submissions_dict[name]) {
-      submissions_dict[name] = {};
-    }
-    // Filter out other accepted solutions less than one day from the most recent one.
-    if (
-      submissions_dict[name][lang] &&
-      submissions_dict[name][lang] - submissionTimestamp < filterDuplicateSecs
-    ) {
-      continue;
-    }
-    submissions_dict[name][lang] = submissionTimestamp;
-    submissions.push(submission);
+
+    submissions.push({
+      id: submission.id,
+      titleSlug: submission.titleSlug
+    });
   }
+
+
   return true;
 }
 
@@ -258,10 +121,6 @@ async function sync(inputs) {
     repo,
     leetcodeCSRFToken,
     leetcodeSession,
-    filterDuplicateSecs,
-    destinationFolder,
-    verbose,
-    commitHeader,
   } = inputs;
 
   const octokit = new Octokit({
@@ -275,21 +134,19 @@ async function sync(inputs) {
     per_page: 100,
   });
 
-  let lastTimestamp = 0;
+
+
+  let mostRecentTimestamp = 0;
   // commitInfo is used to get the original name / email to use for the author / committer.
   // Since we need to modify the commit time, we can't use the default settings for the
   // authenticated user.
   let commitInfo = commits.data[commits.data.length - 1].commit.author;
   for (const commit of commits.data) {
-    if (
-      !commit.commit.message.startsWith(
-        !!commitHeader ? commitHeader : COMMIT_MESSAGE,
-      )
-    ) {
-      continue;
+    if (!commit.commit.message.startsWith(COMMIT_MESSAGE)) {
+      continue
     }
     commitInfo = commit.commit.author;
-    lastTimestamp = Date.parse(commit.commit.committer.date) / 1000;
+    mostRecentTimestamp = Date.parse(commit.commit.committer.date) / 1000;
     break;
   }
 
@@ -297,7 +154,7 @@ async function sync(inputs) {
   let response = null;
   let offset = 0;
   const submissions = [];
-  const submissions_dict = {};
+
   do {
     log(`Getting submission from LeetCode, offset ${offset}`);
 
@@ -360,10 +217,8 @@ async function sync(inputs) {
     if (
       !addToSubmissions({
         response,
-        lastTimestamp,
-        filterDuplicateSecs,
-        submissions_dict,
         submissions,
+        mostRecentTimestamp
       })
     ) {
       break;
@@ -385,19 +240,38 @@ async function sync(inputs) {
   log(`Syncing ${submissions.length} submissions...`);
   let latestCommitSHA = commits.data[0].sha;
   let treeSHA = commits.data[0].commit.tree.sha;
-  for (i = submissions.length - 1; i >= 0; i--) {
-    submission = await getInfo(
-      submissions[i],
-      leetcodeSession,
-      leetcodeCSRFToken,
-    );
 
-    // Get the question data for the submission.
-    const questionData = await getQuestionData(
-      submission.titleSlug,
-      leetcodeSession,
-      leetcodeCSRFToken,
-    );
+  for (i = submissions.length - 1; i >= 0; i--) {
+    const submissionData = await getSubmissionData(submissions[i].id, leetcodeSession, leetcodeCSRFToken)
+    const questionData = await getQuestionData(submissions[i].titleSlug, leetcodeSession, leetcodeCSRFToken)
+
+    const details = {
+      submissionDetails: submissionData.data.data.submissionDetails,
+      question: questionData.data.data.question
+    }
+
+    const tags = [];
+    for (const t in details.question.topicTags) {
+      // tags.push(` [${details.question.topicTags[t].name}](https://leetcode.com/tag/${details.question.topicTags[t].slug})`);
+      tags.push(details.question.topicTags[t].name);
+    }
+
+    let submission = {
+      id: submissions[i].id,
+      slug: submissions[i].titleSlug,
+      title: details.question.title,
+      lang: details.submissionDetails.lang.name,
+      timestamp: details.submissionDetails.timestamp,
+      code: details.submissionDetails.code,
+      question: NodeHtmlMarkdown.translate(details.question.content),
+      difficulty: details.question.difficulty,
+      tags: tags,
+      runtimeDisplay: details.submissionDetails.runtimeDisplay,
+      memoryDisplay: details.submissionDetails.memoryDisplay,
+    };
+
+    submission.readme = sprightly.sprightly('readme.tmpl', submission);
+
     [treeSHA, latestCommitSHA] = await commit({
       octokit,
       owner,
@@ -407,12 +281,97 @@ async function sync(inputs) {
       treeSHA,
       latestCommitSHA,
       submission,
-      destinationFolder,
-      commitHeader,
-      questionData,
     });
   }
   log("Done syncing all submissions.");
 }
+
+function graphqlHeaders(session, csrfToken) {
+  return {
+    'X-Requested-With': 'XMLHttpRequest',
+    "Content-Type": "application/json",
+    "X-CSRFToken": csrfToken,
+    "Cookie": `csrftoken=${csrfToken};LEETCODE_SESSION=${session};`,
+  };
+}
+
+async function getSubmissionData(id, session, csrfToken) {
+  let data = JSON.stringify({
+    query: `query submissionDetails($submissionId: Int!) {
+      submissionDetails(submissionId: $submissionId) {
+        runtimeDisplay
+        memoryDisplay
+        code
+        timestamp
+        lang {
+          name
+        }
+      }
+    }`,
+    variables: {
+      submissionId: id
+    },
+  });
+
+  const headers = graphqlHeaders(session, csrfToken);
+
+  // No need to break on first request error since that would be done when getting submissions
+  const getInfo = async (maxRetries = 5, retryCount = 0) => {
+    try {
+      const response = await axios.post("https://leetcode.com/graphql/", data, {
+        headers,
+      });
+
+      log(`Got info for submission #${id}`);
+      return response
+    } catch (exception) {
+      if (retryCount >= maxRetries) {
+        throw exception;
+      }
+      log(
+        "Error fetching submission info, retrying in " +
+        3 ** retryCount +
+        " seconds...",
+      );
+      await delay(3 ** retryCount * 1000);
+      return getInfo(maxRetries, retryCount + 1);
+    }
+  };
+
+  return await getInfo();
+}
+
+
+async function getQuestionData(titleSlug, session, csrfToken) {
+  log(`Getting question data for ${titleSlug}...`);
+
+  const headers = graphqlHeaders(session, csrfToken);
+  const graphql = JSON.stringify({
+    query: `query getQuestionDetail($titleSlug: String!) {
+      question(titleSlug: $titleSlug) {
+        title
+        content
+        difficulty
+        topicTags {
+          name
+        }
+      }
+    }`,
+    variables: { titleSlug: titleSlug },
+  });
+
+  try {
+    const response = await axios.post(
+      "https://leetcode.com/graphql/",
+      graphql,
+      { headers },
+    );
+    return response
+  } catch (error) {
+    console.log("error", error);
+  }
+}
+
+
 
 module.exports = { log, sync };
