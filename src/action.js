@@ -2,33 +2,9 @@ const axios = require("axios");
 const { Octokit } = require("@octokit/rest");
 const path = require("path");
 
-const COMMIT_MESSAGE = "Sync LeetCode submission";
+const COMMIT_MESSAGE = '[';
 const LANG_TO_EXTENSION = {
-  bash: "sh",
-  c: "c",
-  cpp: "cpp",
-  csharp: "cs",
-  dart: "dart",
-  elixir: "ex",
-  erlang: "erl",
-  golang: "go",
-  java: "java",
-  javascript: "js",
-  kotlin: "kt",
-  mssql: "sql",
-  mysql: "sql",
-  oraclesql: "sql",
-  php: "php",
-  python: "py",
-  python3: "py",
-  pythondata: "py",
-  postgresql: "sql",
-  racket: "rkt",
-  ruby: "rb",
-  rust: "rs",
-  scala: "scala",
-  swift: "swift",
-  typescript: "ts",
+  'golang': 'go',
 };
 const BASE_URL = "https://leetcode.com";
 
@@ -109,8 +85,8 @@ async function getInfo(submission, session, csrfToken) {
       }
       log(
         "Error fetching submission info, retrying in " +
-          3 ** retryCount +
-          " seconds...",
+        3 ** retryCount +
+        " seconds...",
       );
       await delay(3 ** retryCount * 1000);
       return getInfo(maxRetries, retryCount + 1);
@@ -185,7 +161,7 @@ async function commit(params) {
   const commitResponse = await octokit.git.createCommit({
     owner: owner,
     repo: repo,
-    message: message,
+    message: `${COMMIT_MESSAGE}${submission.social.difficulty}] [${submission.tags}] [${submission.perf.runtimeDisplay}] [${submission.perf.memoryDisplay}]`,
     tree: treeResponse.data.sha,
     parents: [latestCommitSHA],
     author: {
@@ -365,8 +341,8 @@ async function sync(inputs) {
         }
         log(
           "Error fetching submissions, retrying in " +
-            3 ** retryCount +
-            " seconds...",
+          3 ** retryCount +
+          " seconds...",
         );
         // There's a rate limit on LeetCode API, so wait with backoff before retrying.
         await delay(3 ** retryCount * 1000);
